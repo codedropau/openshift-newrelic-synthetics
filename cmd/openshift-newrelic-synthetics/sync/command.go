@@ -8,6 +8,7 @@ import (
 	"github.com/newrelic/newrelic-client-go/newrelic"
 	"github.com/newrelic/newrelic-client-go/pkg/synthetics"
 	routev1 "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -70,8 +71,6 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 		listMonitorsParams.Offset = listMonitorsParams.Offset + list.Count
 	}
 
-	fmt.Println(monitors)
-
 	for _, route := range routes.Items {
 		uri := url.URL{
 			Scheme: "http", // @todo, Find a cost.
@@ -85,36 +84,50 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 
 		urlString := uri.String()
 
+		logger := log.WithFields(log.Fields{
+			"namespace": route.ObjectMeta.Namespace,
+			"name":      route.ObjectMeta.Name,
+			"url":       urlString,
+		})
+
 		// Typically whitelisting is used for limiting traffic which can view the site.
 		// @todo, Consider alternatives to skipping routes with a whitelist.
 		if _, ok := route.ObjectMeta.Annotations[AnnotationIPWhitelist]; ok {
-			fmt.Println("Skipping because a whitelist has been set:", route.ObjectMeta.Namespace, route.ObjectMeta.Name, urlString)
+			logger.Infoln("Skipping this route because the following annotation is set:", AnnotationIPWhitelist)
 			continue
 		}
 
 		monitor := synthetics.Monitor{
 			Name:      fmt.Sprintf("%s_%s_%s", cmd.NewRelicMonitorPrefix, route.ObjectMeta.Namespace, route.ObjectMeta.Name),
-			Type:      "PING", // @todo, Should be a const.
-			Frequency: 60,
+			Type:      "BROWSER", // @todo, Make configurable.
+			Frequency: 1, // @todo, Make configurable.
 			URI:       urlString,
 			Locations: []string{
 				cmd.NewRelicLocation,
 			},
-			Status:       "ENABLED",
-			SLAThreshold: 7,
-		}
-
-		if monitorExists(monitors, monitor.Name) {
-			fmt.Println("Skipping because already exists:", urlString)
-			continue
+			Status:       "ENABLED", // @todo, Make configurable.
+			SLAThreshold: 7, // @todo, Make configurable.
 		}
 
 		if cmd.DryRun {
-			fmt.Println("Would have created monitor for:", route.ObjectMeta.Namespace, route.ObjectMeta.Name, urlString)
+			logger.Infoln("Dry run is enabled. A monitor would have been created or updated for this route.")
 			continue
 		}
 
-		fmt.Println("Creating monitor:", urlString)
+		if id, exists := monitorExists(monitors, monitor.Name); exists {
+			logger.Infoln("Updating monitor")
+
+			monitor.ID = id
+
+			_, err := nrClient.Synthetics.UpdateMonitor(monitor)
+			if err != nil {
+				panic(err)
+			}
+
+			continue
+		}
+
+		logger.Infoln("Creating monitor")
 
 		_, err := nrClient.Synthetics.CreateMonitor(monitor)
 		if err != nil {
@@ -126,14 +139,14 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 }
 
 // Helper function to check if the monitor already exists.
-func monitorExists(monitors []*synthetics.Monitor, name string) bool {
+func monitorExists(monitors []*synthetics.Monitor, name string) (string, bool) {
 	for _, monitor := range monitors {
 		if monitor.Name == name {
-			return true
+			return monitor.ID, true
 		}
 	}
 
-	return false
+	return "", false
 }
 
 // Command which executes a command for an environment.
@@ -149,7 +162,7 @@ func Command(app *kingpin.Application) {
 	command.Flag("kubernetes-master-url", "URL of the Kubernetes master").Envar("KUBERNETES_MASTER_URL").StringVar(&c.KubernetesMasterURL)
 	command.Flag("kubernetes-config", "Path to the Kubernetes config file").Envar("KUBERNETES_CONFIG").StringVar(&c.KubernetesConfig)
 
-	command.Flag("dry-run", "Print out information which would have been executed").Default("DRY_RUN").BoolVar(&c.DryRun)
+	command.Flag("dry-run", "Print out information which would have been executed").Envar("DRY_RUN").BoolVar(&c.DryRun)
 
 	command.Arg("namespace", "").Required().StringVar(&c.Namespace)
 }
