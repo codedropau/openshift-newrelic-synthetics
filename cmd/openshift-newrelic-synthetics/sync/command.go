@@ -63,8 +63,6 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 
 		monitors = append(monitors, list.Monitors...)
 
-		fmt.Println(list.Count)
-
 		if list.Count != listMonitorsParams.Limit {
 			break
 		}
