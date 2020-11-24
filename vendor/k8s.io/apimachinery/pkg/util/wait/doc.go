@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors.
+Copyright 2014 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// +k8s:conversion-gen=k8s.io/client-go/tools/clientcmd/api
-// +k8s:deepcopy-gen=package
-
-package v1
+// Package wait provides tools for polling or listening for changes
+// to a condition.
+package wait // import "k8s.io/apimachinery/pkg/util/wait"
