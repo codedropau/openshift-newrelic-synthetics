@@ -1,24 +1,26 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"net/url"
-	"context"
 
-	synthetics "github.com/dollarshaveclub/new-relic-synthetics-go"
+	"github.com/newrelic/newrelic-client-go/newrelic"
+	"github.com/newrelic/newrelic-client-go/pkg/synthetics"
 	routev1 "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
+	"gopkg.in/alecthomas/kingpin.v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 type command struct {
-	NewRelicAPIKey string
-	NewRelicLocation string
-	KubernetesMasterURL string
-	KubernetesConfig string
-	DryRun bool
-	Namespace string
+	NewRelicAPIKey        string
+	NewRelicLocation      string
+	NewRelicMonitorPrefix string
+	KubernetesMasterURL   string
+	KubernetesConfig      string
+	DryRun                bool
+	Namespace             string
 }
 
 const (
@@ -37,9 +39,7 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 		panic(err)
 	}
 
-	syntheticsClient, err := synthetics.NewClient(func(s *synthetics.Client) {
-		s.APIKey = cmd.NewRelicAPIKey
-	})
+	nrClient, err := newrelic.New(newrelic.ConfigPersonalAPIKey(cmd.NewRelicAPIKey))
 	if err != nil {
 		panic(err)
 	}
@@ -49,16 +49,36 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 		panic(err)
 	}
 
-	monitors, err := syntheticsClient.GetAllMonitors(0, 0)
-	if err != nil {
-		panic(err)
+	var monitors []*synthetics.Monitor
+
+	listMonitorsParams := &synthetics.ListMonitorsParams{
+		Limit: 50,
 	}
+
+	for {
+		list, err := nrClient.Synthetics.ListMonitors(listMonitorsParams)
+		if err != nil {
+			panic(err)
+		}
+
+		monitors = append(monitors, list.Monitors...)
+
+		fmt.Println(list.Count)
+
+		if list.Count != listMonitorsParams.Limit {
+			break
+		}
+
+		listMonitorsParams.Offset = listMonitorsParams.Offset + list.Count
+	}
+
+	fmt.Println(monitors)
 
 	for _, route := range routes.Items {
 		uri := url.URL{
 			Scheme: "http", // @todo, Find a cost.
-			Host: route.Spec.Host,
-			Path: route.Spec.Path,
+			Host:   route.Spec.Host,
+			Path:   route.Spec.Path,
 		}
 
 		if route.Spec.TLS != nil {
@@ -74,9 +94,9 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 			continue
 		}
 
-		monitor := &synthetics.CreateMonitorArgs{
-			Name:      fmt.Sprintf("%s-%s", route.ObjectMeta.Namespace, route.ObjectMeta.Name),
-			Type:      synthetics.TypeSimple,
+		monitor := synthetics.Monitor{
+			Name:      fmt.Sprintf("%s_%s_%s", cmd.NewRelicMonitorPrefix, route.ObjectMeta.Namespace, route.ObjectMeta.Name),
+			Type:      "PING", // @todo, Should be a const.
 			Frequency: 60,
 			URI:       urlString,
 			Locations: []string{
@@ -98,7 +118,7 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 
 		fmt.Println("Creating monitor:", urlString)
 
-		_, err := syntheticsClient.CreateMonitor(monitor)
+		_, err := nrClient.Synthetics.CreateMonitor(monitor)
 		if err != nil {
 			panic(err)
 		}
@@ -108,8 +128,8 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 }
 
 // Helper function to check if the monitor already exists.
-func monitorExists(monitors *synthetics.GetAllMonitorsResponse, name string) bool {
-	for _, monitor := range monitors.Monitors {
+func monitorExists(monitors []*synthetics.Monitor, name string) bool {
+	for _, monitor := range monitors {
 		if monitor.Name == name {
 			return true
 		}
@@ -126,6 +146,7 @@ func Command(app *kingpin.Application) {
 
 	command.Flag("new-relic-api-key", "API key for authenticating with New Relic").Required().StringVar(&c.NewRelicAPIKey)
 	command.Flag("new-relic-location", "Location which monitors will be provisioned").Default("AWS_AP_SOUTHEAST_2").StringVar(&c.NewRelicLocation)
+	command.Flag("new-relic-monitor-prefix", "Prefix applied to all objects which are managed by this application").Required().StringVar(&c.NewRelicMonitorPrefix)
 
 	command.Flag("kubernetes-master-url", "URL of the Kubernetes master").Envar("KUBERNETES_MASTER_URL").StringVar(&c.KubernetesMasterURL)
 	command.Flag("kubernetes-config", "Path to the Kubernetes config file").Envar("KUBERNETES_CONFIG").StringVar(&c.KubernetesConfig)
