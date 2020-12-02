@@ -2,26 +2,28 @@ package sync
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 
 	"github.com/newrelic/newrelic-client-go/newrelic"
+	"github.com/newrelic/newrelic-client-go/pkg/entities"
 	"github.com/newrelic/newrelic-client-go/pkg/synthetics"
-	routev1 "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
+	routev1 "github.com/openshift/api/route/v1"
+	clientset "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/codedropau/openshift-newrelic-synthetics/internal/monitorutils"
 )
 
 type command struct {
-	NewRelicAPIKey        string
-	NewRelicLocation      string
-	NewRelicMonitorPrefix string
-	KubernetesMasterURL   string
-	KubernetesConfig      string
-	DryRun                bool
-	Namespace             string
+	NewRelicAPIKey      string
+	NewRelicLocation    string
+	KubernetesMasterURL string
+	KubernetesConfig    string
+	DryRun              bool
+	Namespace           string
 }
 
 const (
@@ -29,49 +31,34 @@ const (
 	AnnotationIPWhitelist = "haproxy.router.openshift.io/ip_whitelist"
 )
 
-func (cmd *command) run(c *kingpin.ParseContext) error {
-	config, err := clientcmd.BuildConfigFromFlags(cmd.KubernetesMasterURL, cmd.KubernetesConfig)
+func getRoutes(master, configPath, namespace string) ([]routev1.Route, error) {
+	config, err := clientcmd.BuildConfigFromFlags(master, configPath)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	routeClient, err := routev1.NewForConfig(config)
+	client, err := clientset.NewForConfig(config)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	nrClient, err := newrelic.New(newrelic.ConfigPersonalAPIKey(cmd.NewRelicAPIKey))
+	routes, err := client.Routes(namespace).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	routes, err := routeClient.Routes(cmd.Namespace).List(context.Background(), metav1.ListOptions{})
+	return routes.Items, nil
+}
+
+func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location string, dryRun bool) error {
+	monitors, err := monitorutils.List(client)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	var monitors []*synthetics.Monitor
+	tags := make(map[string][]entities.Tag, len(routes))
 
-	listMonitorsParams := &synthetics.ListMonitorsParams{
-		Limit: 50,
-	}
-
-	for {
-		list, err := nrClient.Synthetics.ListMonitors(listMonitorsParams)
-		if err != nil {
-			panic(err)
-		}
-
-		monitors = append(monitors, list.Monitors...)
-
-		if list.Count != listMonitorsParams.Limit {
-			break
-		}
-
-		listMonitorsParams.Offset = listMonitorsParams.Offset + list.Count
-	}
-
-	for _, route := range routes.Items {
+	for _, route := range routes {
 		uri := url.URL{
 			Scheme: "http", // @todo, Find a cost.
 			Host:   route.Spec.Host,
@@ -98,55 +85,84 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 		}
 
 		monitor := synthetics.Monitor{
-			Name:      fmt.Sprintf("%s_%s_%s", cmd.NewRelicMonitorPrefix, route.ObjectMeta.Namespace, route.ObjectMeta.Name),
+			Name:      urlString,
 			Type:      "BROWSER", // @todo, Make configurable.
 			Frequency: 1, // @todo, Make configurable.
 			URI:       urlString,
 			Locations: []string{
-				cmd.NewRelicLocation,
+				location,
 			},
 			Status:       "ENABLED", // @todo, Make configurable.
 			SLAThreshold: 7, // @todo, Make configurable.
 		}
 
-		if cmd.DryRun {
+		if dryRun {
 			logger.Infoln("Dry run is enabled. A monitor would have been created or updated for this route.")
 			continue
 		}
 
-		if id, exists := monitorExists(monitors, monitor.Name); exists {
-			logger.Infoln("Updating monitor")
+		logger.Infoln("Creating/Updating monitor")
 
-			monitor.ID = id
+		m, err := monitorutils.CreateOrUpdate(client, monitors, monitor)
+		if err != nil {
+			return err
+		}
 
-			_, err := nrClient.Synthetics.UpdateMonitor(monitor)
-			if err != nil {
-				panic(err)
-			}
+		tags[m.Name] = []entities.Tag{
+			{
+				Key: "openshiftRouteNamespace",
+				Values: []string{route.ObjectMeta.Namespace},
+			},
+			{
+				Key: "openshiftRouteName",
+				Values: []string{route.ObjectMeta.Name},
+			},
+			{
+				Key: "openshiftRouteToKind",
+				Values: []string{route.Spec.To.Kind},
+			},
+			{
+				Key: "openshiftRouteToName",
+				Values: []string{route.Spec.To.Name},
+			},
+		}
+	}
 
+	entities, err := client.Entities.SearchEntities(entities.SearchEntitiesParams{
+		Type: "MONITOR",
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, entity := range entities {
+		log.Infoln("Applying tags to:", entity.Name)
+
+		if _, ok := tags[entity.Name]; !ok {
 			continue
 		}
 
-		logger.Infoln("Creating monitor")
-
-		_, err := nrClient.Synthetics.CreateMonitor(monitor)
+		err = client.Entities.AddTags(entity.GUID, tags[entity.Name])
 		if err != nil {
-			panic(err)
+			return err
 		}
 	}
 
 	return nil
 }
 
-// Helper function to check if the monitor already exists.
-func monitorExists(monitors []*synthetics.Monitor, name string) (string, bool) {
-	for _, monitor := range monitors {
-		if monitor.Name == name {
-			return monitor.ID, true
-		}
+func (cmd *command) run(c *kingpin.ParseContext) error {
+	routes, err := getRoutes(cmd.KubernetesMasterURL, cmd.KubernetesConfig, cmd.Namespace)
+	if err != nil {
+		return err
 	}
 
-	return "", false
+	client, err := newrelic.New(newrelic.ConfigPersonalAPIKey(cmd.NewRelicAPIKey))
+	if err != nil {
+		return err
+	}
+
+	return syncSynthetics(client, routes, cmd.NewRelicLocation, cmd.DryRun)
 }
 
 // Command which executes a command for an environment.
@@ -157,7 +173,6 @@ func Command(app *kingpin.Application) {
 
 	command.Flag("new-relic-api-key", "API key for authenticating with New Relic").Required().StringVar(&c.NewRelicAPIKey)
 	command.Flag("new-relic-location", "Location which monitors will be provisioned").Default("AWS_AP_SOUTHEAST_2").StringVar(&c.NewRelicLocation)
-	command.Flag("new-relic-monitor-prefix", "Prefix applied to all objects which are managed by this application").Required().StringVar(&c.NewRelicMonitorPrefix)
 
 	command.Flag("kubernetes-master-url", "URL of the Kubernetes master").Envar("KUBERNETES_MASTER_URL").StringVar(&c.KubernetesMasterURL)
 	command.Flag("kubernetes-config", "Path to the Kubernetes config file").Envar("KUBERNETES_CONFIG").StringVar(&c.KubernetesConfig)
