@@ -1,20 +1,18 @@
 package sync
 
 import (
-	"context"
 	"net/url"
 
 	"github.com/newrelic/newrelic-client-go/newrelic"
 	"github.com/newrelic/newrelic-client-go/pkg/entities"
 	"github.com/newrelic/newrelic-client-go/pkg/synthetics"
 	routev1 "github.com/openshift/api/route/v1"
-	clientset "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/codedropau/openshift-newrelic-synthetics/internal/monitorutils"
+	entityutils "github.com/codedropau/openshift-newrelic-synthetics/internal/newrelic/entity"
+	monitorutils "github.com/codedropau/openshift-newrelic-synthetics/internal/newrelic/monitor"
+	routeutils "github.com/codedropau/openshift-newrelic-synthetics/internal/openshift/route"
 )
 
 type command struct {
@@ -24,30 +22,6 @@ type command struct {
 	KubernetesConfig    string
 	DryRun              bool
 	Namespace           string
-}
-
-const (
-	// AnnotationIPWhitelist used when for skipping routes.
-	AnnotationIPWhitelist = "haproxy.router.openshift.io/ip_whitelist"
-)
-
-func getRoutes(master, configPath, namespace string) ([]routev1.Route, error) {
-	config, err := clientcmd.BuildConfigFromFlags(master, configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	client, err := clientset.NewForConfig(config)
-	if err != nil {
-		return nil, err
-	}
-
-	routes, err := client.Routes(namespace).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	return routes.Items, nil
 }
 
 func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location string, dryRun bool) error {
@@ -79,8 +53,8 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 
 		// Typically whitelisting is used for limiting traffic which can view the site.
 		// @todo, Consider alternatives to skipping routes with a whitelist.
-		if _, ok := route.ObjectMeta.Annotations[AnnotationIPWhitelist]; ok {
-			logger.Infoln("Skipping this route because the following annotation is set:", AnnotationIPWhitelist)
+		if _, ok := route.ObjectMeta.Annotations[routeutils.AnnotationIPWhitelist]; ok {
+			logger.Infoln("Skipping this route because the following annotation is set:", routeutils.AnnotationIPWhitelist)
 			continue
 		}
 
@@ -110,26 +84,26 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 
 		tags[m.Name] = []entities.Tag{
 			{
-				Key: "openshiftRouteNamespace",
+				Key: entityutils.TagOpenShiftRouteNamespace,
 				Values: []string{route.ObjectMeta.Namespace},
 			},
 			{
-				Key: "openshiftRouteName",
+				Key: entityutils.TagOpenShiftRouteName,
 				Values: []string{route.ObjectMeta.Name},
 			},
 			{
-				Key: "openshiftRouteToKind",
+				Key: entityutils.TagOpenShiftRouteToKind,
 				Values: []string{route.Spec.To.Kind},
 			},
 			{
-				Key: "openshiftRouteToName",
+				Key: entityutils.TagOpenShiftRouteToName,
 				Values: []string{route.Spec.To.Name},
 			},
 		}
 	}
 
 	entities, err := client.Entities.SearchEntities(entities.SearchEntitiesParams{
-		Type: "MONITOR",
+		Type: entityutils.TypeMonitor,
 	})
 	if err != nil {
 		return err
@@ -152,7 +126,7 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 }
 
 func (cmd *command) run(c *kingpin.ParseContext) error {
-	routes, err := getRoutes(cmd.KubernetesMasterURL, cmd.KubernetesConfig, cmd.Namespace)
+	routes, err := routeutils.List(cmd.KubernetesMasterURL, cmd.KubernetesConfig, cmd.Namespace)
 	if err != nil {
 		return err
 	}
@@ -171,7 +145,7 @@ func Command(app *kingpin.Application) {
 
 	command := app.Command("sync", "Sync OpenShift Routes to New Relic Synthetics monitors.").Action(c.run)
 
-	command.Flag("new-relic-api-key", "API key for authenticating with New Relic").Required().StringVar(&c.NewRelicAPIKey)
+	command.Flag("new-relic-api-key", "API key for authenticating with New Relic").Envar("NEW_RELIC_API_KEY").Required().StringVar(&c.NewRelicAPIKey)
 	command.Flag("new-relic-location", "Location which monitors will be provisioned").Default("AWS_AP_SOUTHEAST_2").StringVar(&c.NewRelicLocation)
 
 	command.Flag("kubernetes-master-url", "URL of the Kubernetes master").Envar("KUBERNETES_MASTER_URL").StringVar(&c.KubernetesMasterURL)

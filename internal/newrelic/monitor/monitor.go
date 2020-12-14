@@ -1,4 +1,4 @@
-package monitorutils
+package monitor
 
 import (
 	"github.com/newrelic/newrelic-client-go/newrelic"

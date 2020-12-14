@@ -5,12 +5,14 @@ import (
 
 	"gopkg.in/alecthomas/kingpin.v2"
 
+	"github.com/codedropau/openshift-newrelic-synthetics/cmd/openshift-newrelic-synthetics/cleanup"
 	"github.com/codedropau/openshift-newrelic-synthetics/cmd/openshift-newrelic-synthetics/sync"
 )
 
 func main() {
 	app := kingpin.New("openshift-newrelic-synthetics", "Bridging the gap between OpenShift and New Relic Synthetics")
 
+	cleanup.Command(app)
 	sync.Command(app)
 
 	kingpin.MustParse(app.Parse(os.Args[1:]))
