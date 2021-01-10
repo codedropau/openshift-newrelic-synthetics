@@ -1,0 +1,32 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: newrelic-synthetics-sync
+  namespace: kube-system
+spec:
+  schedule: '* * * * *'
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: sync
+              image: codedropau/openshift-newrelic-synthetics:latest
+              imagePullPolicy: Always
+              args:
+                - sync
+                - default # Replace with your namespace.
+              env:
+                - name: NEW_RELIC_API_KEY
+                  value: xxxyyyzzz
+                # - name: DRY_RUN
+                #   value: true
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+                requests:
+                  cpu: 50m
+                  memory: 128Mi

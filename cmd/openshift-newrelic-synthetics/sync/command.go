@@ -153,5 +153,5 @@ func Command(app *kingpin.Application) {
 
 	command.Flag("dry-run", "Print out information which would have been executed").Envar("DRY_RUN").BoolVar(&c.DryRun)
 
-	command.Arg("namespace", "").Required().StringVar(&c.Namespace)
+	command.Arg("namespace", "Namespace where Routes will be queried").Required().StringVar(&c.Namespace)
 }
