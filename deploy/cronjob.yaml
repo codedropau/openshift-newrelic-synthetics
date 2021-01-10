@@ -2,7 +2,7 @@ apiVersion: batch/v1beta1
 kind: CronJob
 metadata:
   name: newrelic-synthetics-sync
-  namespace: kube-system
+  namespace: default
 spec:
   schedule: '* * * * *'
   concurrencyPolicy: Forbid
