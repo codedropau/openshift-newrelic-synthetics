@@ -8,6 +8,10 @@ Sync OpenShift Routes to New Relic Synthetics monitors
 
 ## Usage
 
+Visit NewRelic https://one.newrelic.com/launcher/api-keys-ui.launcher
+
+Create a new 'User' key, name doesn't matter.
+
 The following command will demonstrate which monitors will be created or skipped.
 
 ```bash
@@ -30,5 +34,5 @@ docker build -t newrelic-sync .
 And then can be run with something like:
 
 ```bash
-docker run newrelic-sync
+docker run -v ~/.kube/config:/root/.kube/config newrelic-sync sync --kubernetes-config=/root/.kube/config --new-relic-api-key=XXXXXXXXXXXXXX --dry-run namespace
 ```
