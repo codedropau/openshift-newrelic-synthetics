@@ -58,10 +58,9 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 			continue
 		}
 
-		var status synthetics.MonitorStatusType
-		status = synthetics.MonitorStatus.Enabled
+		var status synthetics.MonitorStatusType = synthetics.MonitorStatus.Enabled
 		if _, ok := route.ObjectMeta.Annotations[routeutils.NewRelicStatus]; ok {
-			logger.Infoln("Route disabled by annotation:", routeutils.NewRelicStatus)
+			logger.Infoln("Monitor disabled by annotation:", routeutils.NewRelicStatus)
 			status = synthetics.MonitorStatus.Disabled
 		}
 
