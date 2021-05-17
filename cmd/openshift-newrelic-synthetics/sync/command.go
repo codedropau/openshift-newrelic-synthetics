@@ -58,15 +58,21 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 			continue
 		}
 
+		var status synthetics.MonitorStatusType = synthetics.MonitorStatus.Enabled
+		if _, ok := route.ObjectMeta.Annotations[routeutils.NewRelicStatus]; ok {
+			logger.Infoln("Monitor disabled by annotation:", routeutils.NewRelicStatus)
+			status = synthetics.MonitorStatus.Disabled
+		}
+
 		monitor := synthetics.Monitor{
 			Name:      urlString,
 			Type:      "BROWSER", // @todo, Make configurable.
-			Frequency: 1, // @todo, Make configurable.
+			Frequency: 1,         // @todo, Make configurable.
 			URI:       urlString,
 			Locations: []string{
 				location,
 			},
-			Status:       "ENABLED", // @todo, Make configurable.
+			Status:       status,
 			SLAThreshold: 7, // @todo, Make configurable.
 		}
 
@@ -84,19 +90,19 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 
 		tags[m.Name] = []entities.Tag{
 			{
-				Key: entityutils.TagOpenShiftRouteNamespace,
+				Key:    entityutils.TagOpenShiftRouteNamespace,
 				Values: []string{route.ObjectMeta.Namespace},
 			},
 			{
-				Key: entityutils.TagOpenShiftRouteName,
+				Key:    entityutils.TagOpenShiftRouteName,
 				Values: []string{route.ObjectMeta.Name},
 			},
 			{
-				Key: entityutils.TagOpenShiftRouteToKind,
+				Key:    entityutils.TagOpenShiftRouteToKind,
 				Values: []string{route.Spec.To.Kind},
 			},
 			{
-				Key: entityutils.TagOpenShiftRouteToName,
+				Key:    entityutils.TagOpenShiftRouteToName,
 				Values: []string{route.Spec.To.Name},
 			},
 		}
