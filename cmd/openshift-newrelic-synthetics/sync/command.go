@@ -2,6 +2,7 @@ package sync
 
 import (
 	"net/url"
+	"os"
 
 	"github.com/newrelic/newrelic-client-go/newrelic"
 	"github.com/newrelic/newrelic-client-go/pkg/entities"
@@ -29,6 +30,8 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 	if err != nil {
 		return err
 	}
+
+	team := getTeamName()
 
 	tags := make(map[string][]entities.Tag, len(routes))
 
@@ -105,6 +108,10 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 				Key:    entityutils.TagOpenShiftRouteToName,
 				Values: []string{route.Spec.To.Name},
 			},
+			{
+				Key:    entityutils.TagTeamTagName,
+				Values: []string{team},
+			},
 		}
 	}
 
@@ -129,6 +136,14 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 	}
 
 	return nil
+}
+
+func getTeamName() string {
+	team := os.Getenv("UA_TEAM_NAME")
+	if len(team) == 0 {
+		return entityutils.TagTeamName
+	}
+	return team
 }
 
 func (cmd *command) run(c *kingpin.ParseContext) error {
