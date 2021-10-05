@@ -9,9 +9,9 @@ const (
 	TagOpenShiftRouteToKind = "openshiftRouteToKind"
 	// TagOpenShiftRouteToName is used to identify the OpenShift Route "To" Name.
 	TagOpenShiftRouteToName = "openshiftRouteToName"
-	// UA team tag name
+	// UA team tag name.
 	TagTeamTagName = "team"
-	// UA default team name
+	// UA default team name.
 	TagTeamName = "sapp"
 
 	// TypeMonitor is used to search for monitors.
