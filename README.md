@@ -36,3 +36,5 @@ And then can be run with something like:
 ```bash
 docker run -v ~/.kube/config:/root/.kube/config newrelic-sync sync --kubernetes-config=/root/.kube/config --new-relic-api-key=XXXXXXXXXXXXXX --dry-run namespace
 ```
+
+Use the UA_TEAM_NAME environment variable to control team tag applied to synthetics rules. Default: sapp
