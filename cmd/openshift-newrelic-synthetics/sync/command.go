@@ -46,6 +46,11 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 			uri.Scheme = "https" // @todo, Find a cost.
 		}
 
+		// Add trailing slash to avoid redirects on non-root paths.
+		if uri.Path != "/" {
+			uri.Path = uri.Path + "/"
+		}
+
 		urlString := uri.String()
 
 		logger := log.WithFields(log.Fields{
