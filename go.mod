@@ -1,4 +1,4 @@
-module github.com/codedropau/openshift-newrelic-synthetics
+module github.com/universityofadelaide/openshift-newrelic-synthetics
 
 go 1.14
 

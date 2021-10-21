@@ -7,8 +7,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 
-	entityutils "github.com/codedropau/openshift-newrelic-synthetics/internal/newrelic/entity"
-	routeutils "github.com/codedropau/openshift-newrelic-synthetics/internal/openshift/route"
+	entityutils "github.com/universityofadelaide/openshift-newrelic-synthetics/internal/newrelic/entity"
+	routeutils "github.com/universityofadelaide/openshift-newrelic-synthetics/internal/openshift/route"
 )
 
 type command struct {
