@@ -47,7 +47,7 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 		}
 
 		// Add trailing slash to avoid redirects on non-root paths.
-		if uri.Path != "/" {
+		if uri.Path != "" && uri.Path != "/" {
 			uri.Path = uri.Path + "/"
 		}
 
