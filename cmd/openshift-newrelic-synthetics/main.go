@@ -5,8 +5,8 @@ import (
 
 	"gopkg.in/alecthomas/kingpin.v2"
 
-	"github.com/codedropau/openshift-newrelic-synthetics/cmd/openshift-newrelic-synthetics/cleanup"
-	"github.com/codedropau/openshift-newrelic-synthetics/cmd/openshift-newrelic-synthetics/sync"
+	"github.com/universityofadelaide/openshift-newrelic-synthetics/cmd/openshift-newrelic-synthetics/cleanup"
+	"github.com/universityofadelaide/openshift-newrelic-synthetics/cmd/openshift-newrelic-synthetics/sync"
 )
 
 func main() {
