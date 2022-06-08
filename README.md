@@ -38,3 +38,17 @@ docker run -v ~/.kube/config:/root/.kube/config newrelic-sync sync --kubernetes-
 ```
 
 Use the UA_TEAM_NAME environment variable to control team tag applied to synthetics rules. Default: sapp
+
+## Disable syncing a route
+
+Disable:
+
+```bash
+oc annotate route/example one.newrelic.com/synthetics-status=Disabled
+```
+
+Enable (delete the annotation):
+
+```bash
+oc annotate route/example one.newrelic.com/synthetics-status-
+```
