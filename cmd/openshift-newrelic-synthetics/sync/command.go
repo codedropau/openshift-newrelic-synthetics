@@ -19,13 +19,14 @@ import (
 type command struct {
 	NewRelicAPIKey      string
 	NewRelicLocation    string
+	MonitorType         string
 	KubernetesMasterURL string
 	KubernetesConfig    string
 	DryRun              bool
 	Namespace           string
 }
 
-func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location string, dryRun bool) error {
+func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location, monitorType string, dryRun bool) error {
 	monitors, err := monitorutils.List(client)
 	if err != nil {
 		return err
@@ -67,6 +68,7 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 		}
 
 		var status synthetics.MonitorStatusType = synthetics.MonitorStatus.Enabled
+
 		if _, ok := route.ObjectMeta.Annotations[routeutils.NewRelicStatus]; ok {
 			logger.Infoln("Monitor disabled by annotation:", routeutils.NewRelicStatus)
 			status = synthetics.MonitorStatus.Disabled
@@ -74,8 +76,8 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 
 		monitor := synthetics.Monitor{
 			Name:      urlString,
-			Type:      "BROWSER", // @todo, Make configurable.
-			Frequency: 1,         // @todo, Make configurable.
+			Type:      synthetics.MonitorType(monitorType), // @todo, Make configurable.
+			Frequency: 1,                                   // @todo, Make configurable.
 			URI:       urlString,
 			Locations: []string{
 				location,
@@ -162,7 +164,7 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 		return err
 	}
 
-	return syncSynthetics(client, routes, cmd.NewRelicLocation, cmd.DryRun)
+	return syncSynthetics(client, routes, cmd.NewRelicLocation, cmd.MonitorType, cmd.DryRun)
 }
 
 // Command which executes a command for an environment.
@@ -173,6 +175,8 @@ func Command(app *kingpin.Application) {
 
 	command.Flag("new-relic-api-key", "API key for authenticating with New Relic").Envar("NEW_RELIC_API_KEY").Required().StringVar(&c.NewRelicAPIKey)
 	command.Flag("new-relic-location", "Location which monitors will be provisioned").Default("AWS_AP_SOUTHEAST_2").StringVar(&c.NewRelicLocation)
+
+	command.Flag("monitor-type", "Type of New Relic Synthetics monitor to use").Default("SIMPLE").Envar("NEW_RELIC_MONITOR_TYPE").StringVar(&c.MonitorType)
 
 	command.Flag("kubernetes-master-url", "URL of the Kubernetes master").Envar("KUBERNETES_MASTER_URL").StringVar(&c.KubernetesMasterURL)
 	command.Flag("kubernetes-config", "Path to the Kubernetes config file").Envar("KUBERNETES_CONFIG").StringVar(&c.KubernetesConfig)
