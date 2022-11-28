@@ -2,6 +2,7 @@ package sync
 
 import (
 	"net/url"
+	"os"
 
 	"github.com/newrelic/newrelic-client-go/newrelic"
 	"github.com/newrelic/newrelic-client-go/pkg/entities"
@@ -10,25 +11,28 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 
-	entityutils "github.com/codedropau/openshift-newrelic-synthetics/internal/newrelic/entity"
-	monitorutils "github.com/codedropau/openshift-newrelic-synthetics/internal/newrelic/monitor"
-	routeutils "github.com/codedropau/openshift-newrelic-synthetics/internal/openshift/route"
+	entityutils "github.com/universityofadelaide/openshift-newrelic-synthetics/internal/newrelic/entity"
+	monitorutils "github.com/universityofadelaide/openshift-newrelic-synthetics/internal/newrelic/monitor"
+	routeutils "github.com/universityofadelaide/openshift-newrelic-synthetics/internal/openshift/route"
 )
 
 type command struct {
 	NewRelicAPIKey      string
 	NewRelicLocation    string
+	MonitorType         string
 	KubernetesMasterURL string
 	KubernetesConfig    string
 	DryRun              bool
 	Namespace           string
 }
 
-func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location string, dryRun bool) error {
+func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location, monitorType string, dryRun bool) error {
 	monitors, err := monitorutils.List(client)
 	if err != nil {
 		return err
 	}
+
+	team := getTeamName()
 
 	tags := make(map[string][]entities.Tag, len(routes))
 
@@ -41,6 +45,11 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 
 		if route.Spec.TLS != nil {
 			uri.Scheme = "https" // @todo, Find a cost.
+		}
+
+		// Add trailing slash to avoid redirects on non-root paths.
+		if uri.Path != "" && uri.Path != "/" {
+			uri.Path = uri.Path + "/"
 		}
 
 		urlString := uri.String()
@@ -58,15 +67,22 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 			continue
 		}
 
+		var status synthetics.MonitorStatusType = synthetics.MonitorStatus.Enabled
+
+		if _, ok := route.ObjectMeta.Annotations[routeutils.NewRelicStatus]; ok {
+			logger.Infoln("Monitor disabled by annotation:", routeutils.NewRelicStatus)
+			status = synthetics.MonitorStatus.Disabled
+		}
+
 		monitor := synthetics.Monitor{
 			Name:      urlString,
-			Type:      "BROWSER", // @todo, Make configurable.
-			Frequency: 1, // @todo, Make configurable.
+			Type:      synthetics.MonitorType(monitorType), // @todo, Make configurable.
+			Frequency: 1,                                   // @todo, Make configurable.
 			URI:       urlString,
 			Locations: []string{
 				location,
 			},
-			Status:       "ENABLED", // @todo, Make configurable.
+			Status:       status,
 			SLAThreshold: 7, // @todo, Make configurable.
 		}
 
@@ -84,20 +100,24 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 
 		tags[m.Name] = []entities.Tag{
 			{
-				Key: entityutils.TagOpenShiftRouteNamespace,
+				Key:    entityutils.TagOpenShiftRouteNamespace,
 				Values: []string{route.ObjectMeta.Namespace},
 			},
 			{
-				Key: entityutils.TagOpenShiftRouteName,
+				Key:    entityutils.TagOpenShiftRouteName,
 				Values: []string{route.ObjectMeta.Name},
 			},
 			{
-				Key: entityutils.TagOpenShiftRouteToKind,
+				Key:    entityutils.TagOpenShiftRouteToKind,
 				Values: []string{route.Spec.To.Kind},
 			},
 			{
-				Key: entityutils.TagOpenShiftRouteToName,
+				Key:    entityutils.TagOpenShiftRouteToName,
 				Values: []string{route.Spec.To.Name},
+			},
+			{
+				Key:    entityutils.TagTeamTagName,
+				Values: []string{team},
 			},
 		}
 	}
@@ -125,6 +145,14 @@ func syncSynthetics(client *newrelic.NewRelic, routes []routev1.Route, location 
 	return nil
 }
 
+func getTeamName() string {
+	team := os.Getenv("UA_TEAM_NAME")
+	if len(team) == 0 {
+		return entityutils.TagTeamName
+	}
+	return team
+}
+
 func (cmd *command) run(c *kingpin.ParseContext) error {
 	routes, err := routeutils.List(cmd.KubernetesMasterURL, cmd.KubernetesConfig, cmd.Namespace)
 	if err != nil {
@@ -136,7 +164,7 @@ func (cmd *command) run(c *kingpin.ParseContext) error {
 		return err
 	}
 
-	return syncSynthetics(client, routes, cmd.NewRelicLocation, cmd.DryRun)
+	return syncSynthetics(client, routes, cmd.NewRelicLocation, cmd.MonitorType, cmd.DryRun)
 }
 
 // Command which executes a command for an environment.
@@ -147,6 +175,8 @@ func Command(app *kingpin.Application) {
 
 	command.Flag("new-relic-api-key", "API key for authenticating with New Relic").Envar("NEW_RELIC_API_KEY").Required().StringVar(&c.NewRelicAPIKey)
 	command.Flag("new-relic-location", "Location which monitors will be provisioned").Default("AWS_AP_SOUTHEAST_2").StringVar(&c.NewRelicLocation)
+
+	command.Flag("monitor-type", "Type of New Relic Synthetics monitor to use").Default("SIMPLE").Envar("NEW_RELIC_MONITOR_TYPE").StringVar(&c.MonitorType)
 
 	command.Flag("kubernetes-master-url", "URL of the Kubernetes master").Envar("KUBERNETES_MASTER_URL").StringVar(&c.KubernetesMasterURL)
 	command.Flag("kubernetes-config", "Path to the Kubernetes config file").Envar("KUBERNETES_CONFIG").StringVar(&c.KubernetesConfig)
